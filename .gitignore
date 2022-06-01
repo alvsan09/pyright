@@ -59,6 +59,9 @@ web_modules/
 .rts2_cache_es/
 .rts2_cache_umd/
 
+# Python cache
+__pycache__
+
 # Optional REPL history
 .node_repl_history
 
@@ -123,3 +126,6 @@ junit.xml
 # OS files
 .DS_Store
 Thumbs.db
+
+# Data for AI model
+data/

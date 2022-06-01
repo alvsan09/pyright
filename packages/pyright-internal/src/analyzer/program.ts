@@ -45,6 +45,7 @@ import { convertPositionToOffset, convertRangeToTextRange, convertTextRangeToRan
 import { computeCompletionSimilarity } from '../common/stringUtils';
 import { DocumentRange, doesRangeContain, doRangesIntersect, Position, Range } from '../common/textRange';
 import { Duration, timingStats } from '../common/timing';
+import { AiCompleter } from '../completion/aiCompleter';
 import {
     AutoImporter,
     AutoImportResult,
@@ -166,6 +167,7 @@ export interface OpenFileOptions {
 //  Opened - temporarily opened in the editor
 //  Shadowed - implementation file that shadows a type stub file
 export class Program {
+    private _aiCompleter: AiCompleter;
     private _console: ConsoleInterface;
     private _sourceFileList: SourceFileInfo[] = [];
     private _sourceFileMap = new Map<string, SourceFileInfo>();
@@ -189,6 +191,14 @@ export class Program {
         this._logTracker = logTracker ?? new LogTracker(console, 'FG');
         this._importResolver = initialImportResolver;
         this._configOptions = initialConfigOptions;
+
+        this._console.info("Auto-complete : Initializing model");
+        this._aiCompleter = new AiCompleter(
+            'C:\\Users\\educphi\\Documents\\pyright\\packages\\pyright-internal\\src\\completion\\prediction.py',
+            'C:\\Users\\educphi\\Documents\\pyright\\packages\\pyright-internal\\data\\data_train_1.0.2_n4.pkl',
+            this._console
+        );
+        this._aiCompleter.start().then(() => this._console.info("Auto complete : Model initialized"));
 
         this._createNewEvaluator();
     }
@@ -1720,8 +1730,40 @@ export class Program {
             }
         );
 
+        const completionItems = completionResult?.completionMap?.toArray();
+        const parseResults = sourceFileInfo.sourceFile.getParseResults();
+
+        if (completionItems && this._aiCompleter.isReady) {
+            const predictions = (await this._aiCompleter.predict(parseResults, position)).slice(0, 100);
+            this._console.info(`predictions : ${predictions.slice(0, 10).toString()} ${predictions.length > 10 ? '...' : ''}`);
+
+            const maxIterations = 2000;
+            let iterations = 0;
+
+            predictions.forEach((prediction, rank) => {
+                // search for common suggestions between intellisense and ai
+                // this can be quite long (O(n*m)) so we only keep a minimal amount of iterations
+                const index = iterations > maxIterations ? -1 : completionItems!.findIndex((item) => item.label === prediction);
+                iterations += completionItems.length;
+                if (index > -1) {
+                    const item = completionItems![index];
+                    item.insertText = item.insertText || item.label;
+                    item.sortText = `#.${rank.toString(10).padStart(4, '0')}.${item.sortText}`;
+                    item.filterText = item.label;
+                    item.label = `★ ${item.label}`;
+                } else {
+                    // add best predictions if not already in completion items
+                    const item = CompletionItem.create('☆ ' + prediction);
+                    item.insertText = prediction;
+                    item.sortText = `~.${rank.toString(10).padStart(4, '0')}.${prediction}`;
+                    item.filterText = prediction;
+                    completionItems!.push(item);
+                }
+            });
+        }
+
         const completionResultsList: CompletionResultsList = {
-            completionList: CompletionList.create(completionResult?.completionMap?.toArray()),
+            completionList: CompletionList.create(completionItems),
             memberAccessInfo: completionResult?.memberAccessInfo,
             autoImportInfo: completionResult?.autoImportInfo,
             extensionInfo: completionResult?.extensionInfo,
@@ -1731,7 +1773,6 @@ export class Program {
             return completionResultsList;
         }
 
-        const parseResults = sourceFileInfo.sourceFile.getParseResults();
         if (parseResults?.parseTree && parseResults?.text) {
             const offset = convertPositionToOffset(position, parseResults.tokenizerOutput.lines);
             if (offset !== undefined) {
