@@ -194,8 +194,8 @@ export class Program {
 
         this._console.info("Auto-complete : Initializing model");
         this._aiCompleter = new AiCompleter(
-            'C:\\Users\\educphi\\Documents\\pyright\\packages\\pyright-internal\\src\\completion\\prediction.py',
-            'C:\\Users\\educphi\\Documents\\pyright\\packages\\pyright-internal\\data\\data_train_1.0.2_n4.pkl',
+            `${this._configOptions.projectRoot}/../../pyright-internal/src/completion/prediction.py`,
+            `${this._configOptions.projectRoot}/../../pyright-internal/data/data_train_1.0.2_n4.pkl`,
             this._console
         );
         this._aiCompleter.start().then(() => this._console.info("Auto complete : Model initialized"));
@@ -1737,14 +1737,17 @@ export class Program {
             const predictions = (await this._aiCompleter.predict(parseResults, position)).slice(0, 100);
             this._console.info(`predictions : ${predictions.slice(0, 10).toString()} ${predictions.length > 10 ? '...' : ''}`);
 
+            const newCompletionItems: CompletionItem[] = [];
             const maxIterations = 2000;
             let iterations = 0;
 
             predictions.forEach((prediction, rank) => {
                 // search for common suggestions between intellisense and ai
                 // this can be quite long (O(n*m)) so we only keep a minimal amount of iterations
-                const index = iterations > maxIterations ? -1 : completionItems!.findIndex((item) => item.label === prediction);
-                iterations += completionItems.length;
+                const index = iterations > maxIterations ? -1 : completionItems!.findIndex((item) => {
+                    ++iterations;
+                    return item.label === prediction;
+                });
                 if (index > -1) {
                     const item = completionItems![index];
                     item.insertText = item.insertText || item.label;
@@ -1757,9 +1760,11 @@ export class Program {
                     item.insertText = prediction;
                     item.sortText = `~.${rank.toString(10).padStart(4, '0')}.${prediction}`;
                     item.filterText = prediction;
-                    completionItems!.push(item);
+                    newCompletionItems.push(item);
                 }
             });
+
+            completionItems.push(...newCompletionItems);
         }
 
         const completionResultsList: CompletionResultsList = {

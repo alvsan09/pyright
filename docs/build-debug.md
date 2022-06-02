@@ -5,6 +5,15 @@ To install the dependencies for all packages in the repo:
 2. Open terminal window in main directory of cloned source
 3. Execute `npm install` to install dependencies
 
+### Requirements for Language Model
+
+I haven't taken the time to package it properly inside Pyright so you have to install Python and the necessary dependencies by yourself
+1. Install Python 3.8
+2. Install the following libraries using pip:
+    - `dill`
+    - `nltk`
+3. Download the `pkl` file and put it under `packages/pyright-internal/data/data_train_1.0.2_n4.pkl`
+
 
 ## Building the CLI
 
