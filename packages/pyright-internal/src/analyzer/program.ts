@@ -45,7 +45,7 @@ import { convertPositionToOffset, convertRangeToTextRange, convertTextRangeToRan
 import { computeCompletionSimilarity } from '../common/stringUtils';
 import { DocumentRange, doesRangeContain, doRangesIntersect, Position, Range } from '../common/textRange';
 import { Duration, timingStats } from '../common/timing';
-import { AiCompleter } from '../completion/aiCompleter';
+import { AiCompleter, AiModel } from '../completion/aiCompleter';
 import {
     AutoImporter,
     AutoImportResult,
@@ -193,11 +193,7 @@ export class Program {
         this._configOptions = initialConfigOptions;
 
         this._console.info("Auto-complete : Initializing model");
-        this._aiCompleter = new AiCompleter(
-            `${this._configOptions.projectRoot}/../../pyright-internal/src/completion/prediction.py`,
-            `${this._configOptions.projectRoot}/../../pyright-internal/data/data_train_1.0.2_n4.pkl`,
-            this._console
-        );
+        this._aiCompleter = AiCompleter.create(AiModel.gpt2, this._configOptions, this._console);
         this._aiCompleter.start().then(() => this._console.info("Auto complete : Model initialized"));
 
         this._createNewEvaluator();

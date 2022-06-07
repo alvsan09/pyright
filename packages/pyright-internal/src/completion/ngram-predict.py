@@ -17,17 +17,9 @@ def load(file: str) -> any:
 		model = pickle.load(fin)
 	return model
 
-def tokenize(text: str) -> list[str]:
-	tokenizer = RegexpTokenizer(r'\w+|@|\!|\#|\$|\^|&|\*|\<|\>|\?|~|\||%|\.|\,|\(|\)|\[|\]|\"|\'|\`|\:|\{|\}|;|=|\/|\\|\s+|\+|-')
-	return tokenizer.tokenize()
-
 def predict(model, context: tuple[str]) -> list :
 	if model == None : return []
-	return nlh.top(model, context)
-
-# def tokens() -> list[str]:
-# 	if model == None : return []
-# 	return []
+	return nlh.top(model, context, 10)
 
 def main():
 	[pyScriptPath, pkl_file] = sys.argv

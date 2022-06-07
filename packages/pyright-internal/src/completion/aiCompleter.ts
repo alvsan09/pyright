@@ -1,11 +1,30 @@
 import * as child_process from 'child_process';
+import path from 'path';
 import * as readline from 'readline';
 
+import { ConfigOptions } from '../common/configOptions';
 import { ConsoleInterface, StandardConsole } from '../common/console';
+import { convertPositionToOffset } from '../common/positionUtils';
 import { Position } from '../common/textRange';
 import { ParseResults } from '../parser/parser';
 
-export class AiCompleter {
+export enum AiModel {
+	ngram = 'ngram',
+	gpt2 = 'gpt2'
+}
+
+// We should find a way to automatically copy python scripts and model data in the dist directory
+
+const srcPath = ['..', '..', 'pyright-internal', 'src', 'completion'];
+const dataPath = ['..', '..', 'pyright-internal', 'data'];
+
+const ngramScriptPath = [...srcPath, 'ngram-predict.py'];
+const ngramModelPath = [...dataPath, 'data_train_1.0.2_n4.pkl'];
+
+const gpt2ScriptPath = [...srcPath, 'gpt2-predict.py'];
+const gpt2ModelPath = [...dataPath, 'gpt2'];
+
+export abstract class AiCompleter {
 
 	#pyScriptPath: string;
 	#modelPath: string;
@@ -14,11 +33,29 @@ export class AiCompleter {
 	#stdout!: readline.Interface;
     #isReady: boolean;
 
-	constructor(pyScriptPath: string, modelPath: string, console: ConsoleInterface) {
+	protected constructor(pyScriptPath: string, modelPath: string, console: ConsoleInterface) {
 		this.#pyScriptPath = pyScriptPath;
 		this.#modelPath = modelPath;
         this.#console = console || new StandardConsole();
         this.#isReady = false;
+	}
+
+	static create(model: AiModel, configOptions: ConfigOptions, console: ConsoleInterface): AiCompleter {
+		if (model === AiModel.ngram) {
+			return new NgramCompleter(
+				path.resolve(configOptions.projectRoot, ...ngramScriptPath),
+				path.resolve(configOptions.projectRoot, ...ngramModelPath),
+				console
+			)
+		} else if (model === AiModel.gpt2) {
+			return new GPT2Completer(
+				path.resolve(configOptions.projectRoot, ...gpt2ScriptPath),
+				path.resolve(configOptions.projectRoot, ...gpt2ModelPath),
+				console
+			)
+		} else {
+			throw new TypeError(`${model} is not a valid AI model`);
+		}
 	}
 
 	async start(): Promise<void> {
@@ -44,10 +81,9 @@ export class AiCompleter {
 			return [];
 		}
 
-		const match = this.#lineAt(parseResults, position).substring(0, position.character).match(/\w+$/);
-		const lastWordTyped = match ? match[0] : '';
+		const lastWordTyped = this.getLastWordTyped(parseResults, position);
 
-		const context = this.#lineAt(parseResults, position).substring(0, position.character - lastWordTyped.length).trim();
+		const context = this.getContext(parseResults, position, lastWordTyped);
 
 		this.#console.info('context : ' + context);
 		if (!context) {
@@ -65,8 +101,28 @@ export class AiCompleter {
 		});
 	}
 
-	#lineAt(parseResults: ParseResults, position: Position): string {
+	protected lineAt(parseResults: ParseResults, position: Position): string {
 		const line = parseResults.tokenizerOutput.lines.getItemAt(position.line);
 		return parseResults.text.substring(line.start, line.start + line.length);
+	}
+
+	protected getLastWordTyped(parseResults: ParseResults, position: Position): string {
+		const match = this.lineAt(parseResults, position).substring(0, position.character).match(/\w+$/);
+		return match ? match[0] : '';
+	}
+
+	protected abstract getContext(parseResults: ParseResults, position: Position, lastWordTyped?: string): string;
+}
+
+class NgramCompleter extends AiCompleter {
+	protected getContext(parseResults: ParseResults, position: Position, lastWordTyped?: string): string {
+		return this.lineAt(parseResults, position).substring(0, position.character - (lastWordTyped?.length || 0)).trim();
+	}
+}
+
+class GPT2Completer extends AiCompleter {
+	protected getContext(parseResults: ParseResults, position: Position, lastWordTyped?: string): string {
+		position.character -= lastWordTyped?.length || 0;
+		return parseResults.text.substring(0, convertPositionToOffset(position, parseResults.tokenizerOutput.lines));
 	}
 }
