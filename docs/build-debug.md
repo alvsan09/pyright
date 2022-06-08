@@ -12,7 +12,9 @@ I haven't taken the time to package it properly inside Pyright so you have to in
 2. Install the following libraries using pip:
     - `dill`
     - `nltk`
-3. Download the `pkl` file and put it under `packages/pyright-internal/data/data_train_1.0.2_n4.pkl`
+    - `transformers`
+3. **ngram** : Download the `pkl` file and put it under `packages/pyright-internal/data/data_train_1.0.2_n4.pkl` <br>
+   **gpt2** : Download `gpt2_finetune.tar.gz` and extract it under `packages/pyright-internal/data/gpt2`
 
 
 ## Building the CLI
