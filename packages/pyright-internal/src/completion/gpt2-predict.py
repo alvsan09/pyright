@@ -15,17 +15,17 @@ regexp_tokenizer = RegexpTokenizer(word_tokens)
 def write_json(any):
 	print(json.dumps(any), flush=True)
 
-def load(model_file_path: str) -> tuple[GPT2LMHeadModel, GPT2Tokenizer]:
+def load(model_file_path: str) -> 'tuple[GPT2LMHeadModel, GPT2Tokenizer]':
 	tokenizer = GPT2Tokenizer.from_pretrained(model_file_path, local_files_only=True, padding_side='left')
 	model = GPT2LMHeadModel.from_pretrained(model_file_path, local_files_only=True)
 	return model, tokenizer
 
-def predict(model: GPT2LMHeadModel, tokenizer: GPT2Tokenizer, context: tuple[str]) -> list :
+def predict(model: GPT2LMHeadModel, tokenizer: GPT2Tokenizer, context: 'tuple[str]') -> list :
 
 	# Create key_values recursively for all possible contexts
 	inputs = tokenizer.encode(context)
 	past_key_values = None
-	stack: list[tuple[int, tuple | None]] = []
+	stack: list[tuple] = []
 	for input in inputs:
 		stack.append((input, past_key_values))
 		outputs = model.forward(torch.tensor([input]), past_key_values=past_key_values, use_cache=True, return_dict=True)
