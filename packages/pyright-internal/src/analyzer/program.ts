@@ -865,6 +865,10 @@ export class Program {
         if (fileToParse.sourceFile.parse(this._configOptions, this._importResolver, content)) {
             this._parsedFileCount++;
             this._updateSourceFileImports(fileToParse, this._configOptions);
+
+            if (fileToParse.isOpenByClient) {
+                this._aiCompleter.predict(fileToParse.sourceFile.getParseResults());
+            }
         }
 
         if (fileToParse.sourceFile.isFileDeleted()) {
@@ -1731,7 +1735,7 @@ export class Program {
 
         if (completionItems && this._aiCompleter.isReady) {
             const predictions = (await this._aiCompleter.predict(parseResults, position)).slice(0, 100);
-            this._console.info(`predictions : ${predictions.slice(0, 10).toString()} ${predictions.length > 10 ? '...' : ''}`);
+            // this._console.info(`predictions : ${predictions.slice(0, 10).toString()} ${predictions.length > 10 ? '...' : ''}`);
 
             const newCompletionItems: CompletionItem[] = [];
             const maxIterations = 2000;

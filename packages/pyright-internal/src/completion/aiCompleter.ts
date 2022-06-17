@@ -4,7 +4,7 @@ import * as readline from 'readline';
 
 import { ConfigOptions } from '../common/configOptions';
 import { ConsoleInterface, StandardConsole } from '../common/console';
-import { convertPositionToOffset } from '../common/positionUtils';
+import { convertOffsetToPosition, convertPositionToOffset } from '../common/positionUtils';
 import { Position } from '../common/textRange';
 import { ParseResults } from '../parser/parser';
 
@@ -32,12 +32,16 @@ export abstract class AiCompleter {
 	#childProcess!: child_process.ChildProcess;
 	#stdout!: readline.Interface;
     #isReady: boolean;
+	#predictions: Map<string, string[]>;
+	#pendingPredictions: Set<string>;
 
 	protected constructor(pyScriptPath: string, modelPath: string, console: ConsoleInterface) {
 		this.#pyScriptPath = pyScriptPath;
 		this.#modelPath = modelPath;
         this.#console = console || new StandardConsole();
         this.#isReady = false;
+		this.#predictions = new Map();
+		this.#pendingPredictions = new Set();
 	}
 
 	static create(model: AiModel, configOptions: ConfigOptions, console: ConsoleInterface): AiCompleter {
@@ -76,20 +80,35 @@ export abstract class AiCompleter {
 		});
 	}
 	
-	async predict(parseResults: ParseResults | undefined, position: Position): Promise<string[]> {
-		if (!parseResults) {
+	async predict(parseResults: ParseResults | undefined, position?: Position): Promise<string[]> {
+		if (!this.#isReady || !parseResults?.text.length) {
 			return [];
 		}
 
-		const lastWordTyped = this.getLastWordTyped(parseResults, position);
+		const lines = parseResults.tokenizerOutput.lines;
+		position = position || convertOffsetToPosition(lines.end, lines);
 
+		const lastWordTyped = this.getLastWordTyped(parseResults, position);
 		const context = this.getContext(parseResults, position, lastWordTyped);
 
 		this.#console.info('context : ' + context);
 		if (!context) {
 			return [];
 		}
-		return this.#ghettoRpc('predict', { context });
+
+		// Do not request predictions if an identical request is already pending
+		if (this.#pendingPredictions.has(context)) {
+			return [];
+		}
+
+		if (!this.#predictions.has(context)) {
+			this.#pendingPredictions.add(context);
+			const predictions = await this.#ghettoRpc('predict', { context });
+			this.#predictions.set(context, predictions);
+			this.#pendingPredictions.delete(context);
+		}
+
+		return this.#predictions.get(context)!;
 	}
 
     get isReady() { return this.#isReady; }
@@ -123,6 +142,7 @@ class NgramCompleter extends AiCompleter {
 class GPT2Completer extends AiCompleter {
 	protected getContext(parseResults: ParseResults, position: Position, lastWordTyped?: string): string {
 		position.character -= lastWordTyped?.length || 0;
-		return parseResults.text.substring(0, convertPositionToOffset(position, parseResults.tokenizerOutput.lines));
+		// Trim trailing whitespace or endline
+		return parseResults.text.substring(0, convertPositionToOffset(position, parseResults.tokenizerOutput.lines)).trim();
 	}
 }
