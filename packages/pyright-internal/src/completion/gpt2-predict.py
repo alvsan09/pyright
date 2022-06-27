@@ -23,11 +23,13 @@ class Model:
 	def predict(self, context: 'tuple[str]') -> list :
 
 		inputs = self.tokenizer.encode(context, return_tensors="pt")
-		predictions = self.beam_search(inputs, 2, 3)
+		predictions = self.beam_search(inputs, 4, 10)
 
 		# Generate method for greedy search, only 1 sequence
 		inputs = self.tokenizer.encode(context, return_tensors="pt")
-		predictions_classic = self.model.generate(inputs, num_beams=3, max_new_tokens=2, num_return_sequences=3)
+		predictions_classic = self.model.generate(inputs, num_beams=10, max_new_tokens=4, num_return_sequences=10)
+
+		print(predictions_classic)
 
 		return predictions
 
@@ -47,7 +49,7 @@ class Model:
 		
 		return sequence
 
-	def beam_search(self, inputs: torch.LongTensor, num_new_tokens: int, num_beams: int) -> 'list[list[int]]':
+	def beam_search(self, inputs: torch.LongTensor, num_new_tokens: int, num_beams: int) -> torch.Tensor:
 
 		if num_beams < 2:
 			return ValueError('num_beams should be greater or equal to 2, otherwise use greedy_search')
@@ -63,7 +65,7 @@ class Model:
 		# Initialize memory
 		sequences = top_indices.unsqueeze(1)
 		pkv_mem = [outputs.past_key_values] * num_beams
-		logit_sums = top_values
+		probs = top_values.softmax(dim = 0)
 
 		# Recursive beam search
 		for iteration in range(num_new_tokens - 1):
@@ -85,27 +87,27 @@ class Model:
 			# Extract most probable tokens
 			last_logits = outputs.logits[:, 0]
 			top_values, top_indices = last_logits.topk(num_beams, sorted=True)
-			# Multiply logits by previous logits
-			new_logit_sums = torch.add(top_values, logit_sums.unsqueeze(1))
+			# Multiply probabilities by previous for each line
+			new_probs = torch.mul(top_values.softmax(dim = 1), probs.unsqueeze(1))
 
 			# Generate new sequences, their probabilities and past key values
 			new_sequences = torch.empty((0, iteration + 2), dtype=torch.int32)
 			line_indices = [0] * num_beams
 			for i in range(num_beams):
-				# Find highest value for all logits, knowing that topk also does ordering
-				max_sums = [new_logit_sums[i, line_indices[i]].item() for i in range(num_beams)]
+				# Find highest value for all probabilities, knowing that torch.topk also does ordering
+				max_sums = [new_probs[i, line_indices[i]].item() for i in range(num_beams)]
 				column_index = argmax(max_sums)
 
 				# Form a new sequence with the best token and its corresponding previous sequence
 				sequence = torch.cat((sequences[column_index], top_indices[column_index, line_indices[column_index]].unsqueeze(0)))
 				new_sequences = torch.cat((new_sequences, sequence.unsqueeze(0)))
 
-				# Update logit products
-				logit_sums[i] = new_logit_sums[column_index, line_indices[column_index]]
+				# Update probability products
+				probs[i] = new_probs[column_index, line_indices[column_index]]
 
 				# Update past keys and values stack
 				new_pkv = []
-				for keys, values in past_key_values:
+				for keys, values in outputs.past_key_values:
 					layer = keys[column_index].unsqueeze(0), values[column_index].unsqueeze(0)
 					new_pkv.append(layer)
 				pkv_mem[i] = new_pkv
