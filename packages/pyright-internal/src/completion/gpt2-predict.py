@@ -1,8 +1,6 @@
 import json
 import sys
-from typing import TypedDict
 import torch
-import time
 
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
@@ -26,7 +24,7 @@ class Model:
 	def predict(self, context: 'tuple[str]') -> 'list[str]' :
 
 		inputs = self.tokenizer.encode(context)
-		sequences = self.beam_search(inputs, 4, 10)
+		sequences = self.beam_search(inputs, max_new_tokens, max_top_next)
 
 		"""Equivalent `generate` method for comparison"""
 		# inputs = self.tokenizer.encode(context, return_tensors="pt")
@@ -119,7 +117,7 @@ class Model:
 
 		return sequences
 
-	def forward(self, inputs: list[int]) -> CausalLMOutputWithCrossAttentions:
+	def forward(self, inputs: 'list[int]') -> CausalLMOutputWithCrossAttentions:
 		
 		# Find longest subsequence in cache
 		known_inputs = tuple(inputs)
