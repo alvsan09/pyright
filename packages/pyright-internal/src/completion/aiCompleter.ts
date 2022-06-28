@@ -33,7 +33,7 @@ export abstract class AiCompleter {
 	#stdout!: readline.Interface;
     #isReady: boolean;
 	#predictions: Map<string, string[]>;
-	#pendingPredictions: Set<string>;
+	#pendingPredictions: Map<string, Promise<string[]>>;
 
 	protected constructor(pyScriptPath: string, modelPath: string, console: ConsoleInterface) {
 		this.#pyScriptPath = pyScriptPath;
@@ -41,7 +41,7 @@ export abstract class AiCompleter {
         this.#console = console || new StandardConsole();
         this.#isReady = false;
 		this.#predictions = new Map();
-		this.#pendingPredictions = new Set();
+		this.#pendingPredictions = new Map();
 	}
 
 	static create(model: AiModel, configOptions: ConfigOptions, console: ConsoleInterface): AiCompleter {
@@ -98,12 +98,13 @@ export abstract class AiCompleter {
 
 		// Do not request predictions if an identical request is already pending
 		if (this.#pendingPredictions.has(context)) {
-			return [];
+			return this.#pendingPredictions.get(context)!;
 		}
 
 		if (!this.#predictions.has(context)) {
-			this.#pendingPredictions.add(context);
-			const predictions = await this.#ghettoRpc('predict', { context });
+			const promise = this.#ghettoRpc('predict', { context });
+			this.#pendingPredictions.set(context, promise);
+			const predictions = await promise;
 			this.#predictions.set(context, predictions);
 			this.#pendingPredictions.delete(context);
 		}

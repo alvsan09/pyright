@@ -23,15 +23,17 @@ class Model:
 		self.model: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(model_file_path, local_files_only=True)
 		self.cache = dict()
 
-	def predict(self, context: 'tuple[str]') -> list :
+	def predict(self, context: 'tuple[str]') -> 'list[str]' :
 
 		inputs = self.tokenizer.encode(context)
-		predictions = self.beam_search(inputs, 4, 10)
+		sequences = self.beam_search(inputs, 4, 10)
 
-		inputs = self.tokenizer.encode(context, return_tensors="pt")
-		predictions_classic = self.model.generate(inputs, num_beams=10, max_new_tokens=4, num_return_sequences=10)
+		"""Equivalent `generate` method for comparison"""
+		# inputs = self.tokenizer.encode(context, return_tensors="pt")
+		# predictions_classic = self.model.generate(inputs, num_beams=10, max_new_tokens=4, num_return_sequences=10)
+		# print(self.tokenizer.batch_decode(predictions_classic))
 
-		print(predictions_classic)
+		predictions = self.tokenizer.batch_decode(sequences)
 
 		return predictions
 
@@ -186,9 +188,8 @@ def main():
 		if method == 'predict':
 			context: str = params['context']
 			predictions = model.predict(context)
-			# predictions = list(map(trim, predictions))
-			# write_json(predictions)
-			print(predictions)
+			predictions = list(map(trim, predictions))
+			write_json(predictions)
 		if method == 'exit':
 			break
 
