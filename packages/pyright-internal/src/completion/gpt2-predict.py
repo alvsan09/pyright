@@ -89,28 +89,28 @@ class Model:
 
 			# Generate new sequences, their probabilities and past key values
 			new_sequences = torch.empty((0, iteration + 2), dtype=torch.int32)
-			line_indices = [0] * num_beams
+			column_indices = [0] * num_beams
 			for i in range(num_beams):
 				# Find highest value for all probabilities, knowing that torch.topk also does ordering
-				max_sums = [new_probs[i, line_indices[i]].item() for i in range(num_beams)]
-				column_index = argmax(max_sums)
+				max_sums = [new_probs[line, column_indices[line]].item() for line in range(num_beams)]
+				line_index = argmax(max_sums)
 
 				# Form a new sequence with the best token and its corresponding previous sequence
-				sequence = torch.cat((sequences[column_index], top_indices[column_index, line_indices[column_index]].unsqueeze(0)))
+				sequence = torch.cat((sequences[line_index], top_indices[line_index, column_indices[line_index]].unsqueeze(0)))
 				new_sequences = torch.cat((new_sequences, sequence.unsqueeze(0)))
 
 				# Update probability products
-				probs[i] = new_probs[column_index, line_indices[column_index]]
+				probs[i] = new_probs[line_index, column_indices[line_index]]
 
 				# Update past keys and values stack
 				new_pkv = []
 				for keys, values in outputs.past_key_values:
-					layer = keys[column_index].unsqueeze(0), values[column_index].unsqueeze(0)
+					layer = keys[line_index].unsqueeze(0), values[line_index].unsqueeze(0)
 					new_pkv.append(layer)
 				pkv_mem[i] = new_pkv
 
 				# Consider next best element from selected context
-				line_indices[column_index] += 1
+				column_indices[line_index] += 1
 
 			sequences = new_sequences
 
