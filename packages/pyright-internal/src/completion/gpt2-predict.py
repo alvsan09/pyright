@@ -1,9 +1,11 @@
 import json
 import sys
+from typing import TypedDict
 import torch
 import time
 
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from nltk.tokenize import RegexpTokenizer
 from numpy import argmax
 
@@ -19,13 +21,13 @@ class Model:
 	def __init__(self, model_file_path: str):
 		self.tokenizer: GPT2Tokenizer = GPT2Tokenizer.from_pretrained(model_file_path, local_files_only=True, padding_side='left')
 		self.model: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(model_file_path, local_files_only=True)
+		self.cache = dict()
 
 	def predict(self, context: 'tuple[str]') -> list :
 
-		inputs = self.tokenizer.encode(context, return_tensors="pt")
+		inputs = self.tokenizer.encode(context)
 		predictions = self.beam_search(inputs, 4, 10)
 
-		# Generate method for greedy search, only 1 sequence
 		inputs = self.tokenizer.encode(context, return_tensors="pt")
 		predictions_classic = self.model.generate(inputs, num_beams=10, max_new_tokens=4, num_return_sequences=10)
 
@@ -34,12 +36,9 @@ class Model:
 		return predictions
 
 	def greedy_search(self, inputs: 'list[int]', num_new_tokens: int) -> 'list[int]':
-		# Generate previous states recursively
-		# TODO: Cache
-		past_key_values = None
-		for input in inputs:
-			outputs = self.model.forward(torch.tensor([input]), past_key_values=past_key_values, use_cache=True, return_dict=True)
-			past_key_values = outputs.past_key_values
+
+		# Generate previous states
+		outputs = self.forward(inputs)
 
 		sequence: 'list[int]' = []
 		while len(sequence) < num_new_tokens :
@@ -49,17 +48,16 @@ class Model:
 		
 		return sequence
 
-	def beam_search(self, inputs: torch.LongTensor, num_new_tokens: int, num_beams: int) -> torch.Tensor:
+	def beam_search(self, inputs: 'list[int]', num_new_tokens: int, num_beams: int) -> torch.Tensor:
 
 		if num_beams < 2:
 			return ValueError('num_beams should be greater or equal to 2, otherwise use greedy_search')
 
 		# Generate previous states
-		# TODO: Cache
-		outputs = self.model.forward(inputs, use_cache=True, return_dict=True)
+		outputs = self.forward(inputs)
 		
 		# Collect top tokens from logits
-		last_logits = outputs.logits[-1, -1]
+		last_logits = outputs.logits[-1]
 		top_values, top_indices = last_logits.topk(num_beams)
 
 		# Initialize memory
@@ -118,6 +116,47 @@ class Model:
 			sequences = new_sequences
 
 		return sequences
+
+	def forward(self, inputs: list[int]) -> CausalLMOutputWithCrossAttentions:
+		
+		# Find longest subsequence in cache
+		known_inputs = tuple(inputs)
+		while known_inputs not in self.cache and len(known_inputs) > 0:
+			known_inputs = known_inputs[:-1]
+
+		outputs: CausalLMOutputWithCrossAttentions = self.cache.get(known_inputs)
+		past_key_values = outputs.past_key_values if len(known_inputs) > 0 else None
+
+		if past_key_values:
+			# Check if full sequence is already known
+			if known_inputs == tuple(inputs):
+				length_from_start = past_key_values[0][0].size(2)
+				if len(inputs) == length_from_start:
+					# Return outputs as is
+					return outputs
+				else:
+					# Go back one token to generate logits otherwise
+					known_inputs = known_inputs[:-1]
+					# Possible improvement: truncate known logits and past_key_values
+
+			# Truncate necessary past_key_values for generation
+			n = len(known_inputs)
+			past_key_values = tuple(
+				(keys[:,:,0:n,:], values[:,:,0:n,:])
+				for keys, values in past_key_values
+			)
+
+		# Forward pass
+		outputs = self.model.forward(torch.tensor(inputs[len(known_inputs):]), past_key_values=past_key_values, use_cache=True, return_dict=True)
+
+		# Save outputs for all previously unknown sequences
+		unknown_sequence = tuple(inputs)
+		while len(unknown_sequence) >= len(known_inputs) and len(unknown_sequence) > 0:
+			if unknown_sequence not in self.cache:
+				self.cache.update({unknown_sequence: outputs})
+			unknown_sequence = unknown_sequence[:-1]
+
+		return outputs
 
 def trim(text: str) -> str:
 	words = regexp_tokenizer.tokenize(text)
