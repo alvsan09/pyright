@@ -8,7 +8,7 @@ from nltk.tokenize import RegexpTokenizer
 from numpy import argmax
 
 max_top_next = 20
-max_new_tokens = 2
+max_new_tokens = 4
 
 # to find all words that are not special characters
 word_tokens = r'\w+'
@@ -28,8 +28,7 @@ class Model:
 
 		"""Equivalent `generate` method for comparison"""
 		# inputs = self.tokenizer.encode(context, return_tensors="pt")
-		# predictions_classic = self.model.generate(inputs, num_beams=10, max_new_tokens=4, num_return_sequences=10)
-		# print(self.tokenizer.batch_decode(predictions_classic))
+		# predictions = self.model.generate(inputs, num_beams=max_top_next, max_new_tokens=max_new_tokens, num_return_sequences=max_top_next)
 
 		predictions = self.tokenizer.batch_decode(sequences)
 
