@@ -28,7 +28,7 @@ class Model:
 
 		"""Equivalent `generate` method for comparison"""
 		# inputs = self.tokenizer.encode(context, return_tensors="pt")
-		# predictions = self.model.generate(inputs, num_beams=max_top_next, max_new_tokens=max_new_tokens, num_return_sequences=max_top_next)
+		# sequences_classic = self.model.generate(inputs, num_beams=max_top_next, max_new_tokens=max_new_tokens, num_return_sequences=max_top_next)
 
 		predictions = self.tokenizer.batch_decode(sequences)
 
@@ -56,13 +56,13 @@ class Model:
 		outputs = self.forward(inputs)
 		
 		# Collect top tokens from logits
-		last_logits = outputs.logits[-1]
+		last_logits = outputs.logits[-1].softmax(dim = 0)
 		top_values, top_indices = last_logits.topk(num_beams)
 
 		# Initialize memory
 		sequences = top_indices.unsqueeze(1)
 		pkv_mem = [outputs.past_key_values] * num_beams
-		probs = top_values.softmax(dim = 0)
+		probs = top_values
 
 		# Recursive beam search
 		for iteration in range(num_new_tokens - 1):
@@ -82,10 +82,10 @@ class Model:
 			outputs = self.model.forward(next_inputs, past_key_values=tuple(past_key_values), use_cache=True, return_dict=True)
 
 			# Extract most probable tokens
-			last_logits = outputs.logits[:, 0]
+			last_logits = outputs.logits[:, 0].softmax(dim = 1)
 			top_values, top_indices = last_logits.topk(num_beams, sorted=True)
 			# Multiply probabilities by previous for each line
-			new_probs = torch.mul(top_values.softmax(dim = 1), probs.unsqueeze(1))
+			new_probs = torch.mul(top_values, probs.unsqueeze(1))
 
 			# Generate new sequences, their probabilities and past key values
 			new_sequences = torch.empty((0, iteration + 2), dtype=torch.int32)
