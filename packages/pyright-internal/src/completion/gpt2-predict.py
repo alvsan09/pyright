@@ -1,4 +1,5 @@
 import json
+from msilib import sequence
 import sys
 import torch
 
@@ -7,8 +8,8 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from nltk.tokenize import RegexpTokenizer
 from numpy import argmax
 
-max_top_next = 20
-max_new_tokens = 4
+max_top_next = 10
+max_new_tokens = 2
 
 # to find all words that are not special characters
 word_tokens = r'\w+'
@@ -33,6 +34,12 @@ class Model:
 		predictions = self.tokenizer.batch_decode(sequences)
 
 		return predictions
+
+	def prepare(self, context: 'tuple[str]') -> None :
+
+		inputs = self.tokenizer.encode(context)
+		self.forward(inputs)
+		return
 
 	def greedy_search(self, inputs: 'list[int]', num_new_tokens: int) -> 'list[int]':
 
@@ -184,9 +191,17 @@ def main():
 
 		if method == 'predict':
 			context: str = params['context']
+			id: int = x['id']
 			predictions = model.predict(context)
 			predictions = list(map(trim, predictions))
-			write_json(predictions)
+			write_json(dict({ 'event': 'predict', 'value': predictions, 'id': id }))
+
+		if method == 'prepare':
+			context: str = params['context']
+			id: int = x['id']
+			model.prepare(context)
+			write_json(dict({ 'event': 'prepare', 'value': True, 'id': id }))
+
 		if method == 'exit':
 			break
 

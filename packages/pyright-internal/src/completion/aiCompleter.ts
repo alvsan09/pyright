@@ -31,17 +31,20 @@ export abstract class AiCompleter {
     #console: ConsoleInterface;
 	#childProcess!: child_process.ChildProcess;
 	#stdout!: readline.Interface;
+	#callCount: number;
     #isReady: boolean;
-	#predictions: Map<string, string[]>;
-	#pendingPredictions: Map<string, Promise<string[]>>;
+
+	protected predictions: Map<string, string[]>;
+	protected pendingPredictions: Map<string, Promise<string[]>>;
 
 	protected constructor(pyScriptPath: string, modelPath: string, console: ConsoleInterface) {
 		this.#pyScriptPath = pyScriptPath;
 		this.#modelPath = modelPath;
         this.#console = console || new StandardConsole();
+		this.#callCount = 0;
         this.#isReady = false;
-		this.#predictions = new Map();
-		this.#pendingPredictions = new Map();
+		this.predictions = new Map();
+		this.pendingPredictions = new Map();
 	}
 
 	static create(model: AiModel, configOptions: ConfigOptions, console: ConsoleInterface): AiCompleter {
@@ -80,7 +83,7 @@ export abstract class AiCompleter {
 		});
 	}
 	
-	async predict(parseResults: ParseResults | undefined, position?: Position): Promise<string[]> {
+	async predict(parseResults: ParseResults | undefined, position?: Position, requestResults = true): Promise<string[]> {
 		if (!this.#isReady || !parseResults?.text.length) {
 			return [];
 		}
@@ -96,28 +99,47 @@ export abstract class AiCompleter {
 			return [];
 		}
 
+		// Use to pre-compute context
+		if (!requestResults) {
+			await this.prepare(context);
+			return [];
+		}
+
 		// Do not request predictions if an identical request is already pending
-		if (this.#pendingPredictions.has(context)) {
-			return this.#pendingPredictions.get(context)!;
+		if (this.pendingPredictions.has(context)) {
+			return this.pendingPredictions.get(context)!;
 		}
 
-		if (!this.#predictions.has(context)) {
-			const promise = this.#ghettoRpc('predict', { context });
-			this.#pendingPredictions.set(context, promise);
+		if (!this.predictions.has(context)) {
+			const promise = this.ghettoRpc('predict', { context });
+			this.pendingPredictions.set(context, promise);
 			const predictions = await promise;
-			this.#predictions.set(context, predictions);
-			this.#pendingPredictions.delete(context);
+			this.predictions.set(context, predictions);
+			this.pendingPredictions.delete(context);
+
+			// Now that predictions are calculated, prepare whole context in advance
+			this.predict(parseResults, undefined, false)
 		}
 
-		return this.#predictions.get(context)!;
+		return this.predictions.get(context)!;
 	}
 
     get isReady() { return this.#isReady; }
 
-	async #ghettoRpc(method: string, params: any): Promise<any> {
-		this.#childProcess.stdin!.write(JSON.stringify({ method, params }) + '\n');
+	protected async ghettoRpc(method: string, params: any): Promise<any> {
+		const id = ++this.#callCount;
+		this.#childProcess.stdin!.write(JSON.stringify({ method, params, id }) + '\n');
+
 		return new Promise(resolve => {
-			this.#stdout.once('line', line => resolve(JSON.parse(line)));
+			const callback = (line: string) => {
+				const res = JSON.parse(line);
+				if (res?.event === method && res?.id === id) {
+					this.#stdout.off('line', callback);
+					resolve(res.value);
+				}
+			}
+
+			this.#stdout.on('line', callback);
 		});
 	}
 
@@ -130,6 +152,10 @@ export abstract class AiCompleter {
 		const match = this.lineAt(parseResults, position).substring(0, position.character).match(/\w+$/);
 		return match ? match[0] : '';
 	}
+	
+	protected async prepare(context: string): Promise<void> { 
+		// Do nothing
+	}
 
 	protected abstract getContext(parseResults: ParseResults, position: Position, lastWordTyped?: string): string;
 }
@@ -141,6 +167,12 @@ class NgramCompleter extends AiCompleter {
 }
 
 class GPT2Completer extends AiCompleter {
+	protected override async prepare(context: string): Promise<void> {
+		if (!this.pendingPredictions.has(context) || !this.predictions.has(context)) {
+			await this.ghettoRpc('prepare', { context });
+		}
+	}
+
 	protected getContext(parseResults: ParseResults, position: Position, lastWordTyped?: string): string {
 		position.character -= lastWordTyped?.length || 0;
 		// Trim trailing whitespace or endline

@@ -40,10 +40,11 @@ def main():
 
 		if method == 'predict':
 			context: str = params['context']
+			id: int = x['id']
 			tokens = tokenizer.tokenize(context)
 			last_tokens = tokens[slice(-n + 1, len(tokens))]
 			predictions = predict(model, tuple(last_tokens))
-			write_json(predictions)
+			write_json(dict({ 'event': 'predict', 'value': predictions, 'id': id }))
 
 if __name__ == "__main__":
 	main()
