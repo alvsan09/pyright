@@ -8,11 +8,12 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from nltk.tokenize import RegexpTokenizer
 from numpy import argmax
 
-max_top_next = 10
-max_new_tokens = 2
+max_top_next = 20
+max_new_tokens = 4
 
 # to find all words that are not special characters
 word_tokens = r'\w+'
+special_chars = [char for char in ' @!#$^&*<>?~|%.,()[]\"\'`:{};=/\\+-']
 regexp_tokenizer = RegexpTokenizer(word_tokens)
 
 class Model:
@@ -25,7 +26,8 @@ class Model:
 	def predict(self, context: 'tuple[str]') -> 'list[str]' :
 
 		inputs = self.tokenizer.encode(context)
-		sequences = self.beam_search(inputs, max_new_tokens, max_top_next)
+		special_tokens = self.tokenizer.encode(special_chars)
+		sequences = self.beam_search(inputs, max_new_tokens, max_top_next, stop_tokens=special_tokens)
 
 		"""Equivalent `generate` method for comparison"""
 		# inputs = self.tokenizer.encode(context, return_tensors="pt")
@@ -54,7 +56,7 @@ class Model:
 		
 		return sequence
 
-	def beam_search(self, inputs: 'list[int]', num_new_tokens: int, num_beams: int) -> torch.Tensor:
+	def beam_search(self, inputs: 'list[int]', num_new_tokens: int, num_beams: int, stop_tokens: 'list[int]' = []) -> torch.Tensor:
 
 		if num_beams < 2:
 			return ValueError('num_beams should be greater or equal to 2, otherwise use greedy_search')
@@ -64,22 +66,26 @@ class Model:
 		
 		# Collect top tokens from logits
 		last_logits = outputs.logits[-1].softmax(dim = 0)
+		last_logits[stop_tokens] = 0 # Remove stop tokens from initial sequences
 		top_values, top_indices = last_logits.topk(num_beams)
 
 		# Initialize memory
 		sequences = top_indices.unsqueeze(1)
 		pkv_mem = [outputs.past_key_values] * num_beams
 		probs = top_values
+		finished_sequences = torch.empty(0, num_new_tokens)
 
 		# Recursive beam search
 		for iteration in range(num_new_tokens - 1):
+			if num_beams <= 0:
+				break
 
 			# Prepare past_key_values
 			N_LAYERS = 12
 			past_key_values = [(torch.empty(0, 12, 3, 64), torch.empty(0, 12, 3, 64))] * N_LAYERS
 			for layer, (keys, values) in enumerate(past_key_values):
-				keys = torch.cat(tuple(pkv[layer][0] for pkv in pkv_mem), dim=0)
-				values = torch.cat(tuple(pkv[layer][1] for pkv in pkv_mem), dim=0)
+				keys = torch.cat(tuple(pkv[layer][0] for pkv in pkv_mem[:num_beams]), dim=0)
+				values = torch.cat(tuple(pkv[layer][1] for pkv in pkv_mem[:num_beams]), dim=0)
 				past_key_values[layer] = (keys, values)
 			
 			# Prepare next inputs (end of generated sequences)
@@ -91,19 +97,34 @@ class Model:
 			# Extract most probable tokens
 			last_logits = outputs.logits[:, 0].softmax(dim = 1)
 			top_values, top_indices = last_logits.topk(num_beams, sorted=True)
+
 			# Multiply probabilities by previous for each line
 			new_probs = torch.mul(top_values, probs.unsqueeze(1))
 
 			# Generate new sequences, their probabilities and past key values
 			new_sequences = torch.empty((0, iteration + 2), dtype=torch.int32)
 			column_indices = [0] * num_beams
-			for i in range(num_beams):
+			i = 0
+			while i < num_beams:
+
 				# Find highest value for all probabilities, knowing that torch.topk also does ordering
 				max_sums = [new_probs[line, column_indices[line]].item() for line in range(num_beams)]
 				line_index = argmax(max_sums)
+				best_next_token = top_indices[line_index, column_indices[line_index]]
+
+				# Save sequence as is if encountering a stop token
+				if best_next_token.item() in stop_tokens:
+					padding = (best_next_token.unsqueeze(0),) * (num_new_tokens - iteration - 1)
+					sequence = torch.cat((sequences[line_index],) + padding)
+					finished_sequences = torch.cat((finished_sequences, sequence.unsqueeze(0)))
+
+					# Stop generating using this sequence
+					num_beams -= 1
+					new_probs[line_index] = 0
+					continue
 
 				# Form a new sequence with the best token and its corresponding previous sequence
-				sequence = torch.cat((sequences[line_index], top_indices[line_index, column_indices[line_index]].unsqueeze(0)))
+				sequence = torch.cat((sequences[line_index], best_next_token.unsqueeze(0)))
 				new_sequences = torch.cat((new_sequences, sequence.unsqueeze(0)))
 
 				# Update probability products
@@ -118,10 +139,13 @@ class Model:
 
 				# Consider next best element from selected context
 				column_indices[line_index] += 1
+				i += 1
 
 			sequences = new_sequences
+			probs = probs[:num_beams]
 
-		return sequences
+		# Return all finished and unfinished sequences
+		return torch.cat((finished_sequences, sequences))
 
 	def forward(self, inputs: 'list[int]') -> CausalLMOutputWithCrossAttentions:
 		
