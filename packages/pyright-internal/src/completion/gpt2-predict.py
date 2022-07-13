@@ -13,7 +13,7 @@ max_new_tokens = 4
 
 # to find all words that are not special characters
 word_tokens = r'\w+'
-special_chars = [char for char in ' @!#$^&*<>?~|%.,()[]\"\'`:{};=/\\+-']
+special_chars = '@!#$^&*<>?~|%.,()[]\"\'`:{};=/\\+-\n @ ! # $ ^ & *  < > ? ~ | % . , ( ) [ ] \" \' ` : { } ; = / \\ + - \n'
 regexp_tokenizer = RegexpTokenizer(word_tokens)
 
 class Model:
@@ -73,11 +73,12 @@ class Model:
 		sequences = top_indices.unsqueeze(1)
 		pkv_mem = [outputs.past_key_values] * num_beams
 		probs = top_values
-		finished_sequences = torch.empty(0, num_new_tokens)
+		finished_sequences = torch.empty((0, num_new_tokens), dtype=torch.int32)
 
 		# Recursive beam search
 		for iteration in range(num_new_tokens - 1):
 			if num_beams <= 0:
+				sequences = torch.empty((0, num_new_tokens), dtype=torch.int32)
 				break
 
 			# Prepare past_key_values
@@ -113,7 +114,7 @@ class Model:
 				best_next_token = top_indices[line_index, column_indices[line_index]]
 
 				# Save sequence as is if encountering a stop token
-				if best_next_token.item() in stop_tokens:
+				if best_next_token.item() in stop_tokens or ' ' in self.tokenizer.decode(best_next_token.item())[0]:
 					padding = (best_next_token.unsqueeze(0),) * (num_new_tokens - iteration - 1)
 					sequence = torch.cat((sequences[line_index],) + padding)
 					finished_sequences = torch.cat((finished_sequences, sequence.unsqueeze(0)))
