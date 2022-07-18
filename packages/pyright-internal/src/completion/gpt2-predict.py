@@ -8,12 +8,13 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from nltk.tokenize import RegexpTokenizer
 from numpy import argmax
 
-max_top_next = 20
+max_top_next = 10
 max_new_tokens = 4
 
 # to find all words that are not special characters
 word_tokens = r'\w+'
 special_chars = '@!#$^&*<>?~|%.,()[]\"\'`:{};=/\\+-\n @ ! # $ ^ & *  < > ? ~ | % . , ( ) [ ] \" \' ` : { } ; = / \\ + - \n'
+spaces = ['Ġ' * i for i in range(1, 32)]
 regexp_tokenizer = RegexpTokenizer(word_tokens)
 
 class Model:
@@ -26,7 +27,7 @@ class Model:
 	def predict(self, context: 'tuple[str]') -> 'list[str]' :
 
 		inputs = self.tokenizer.encode(context)
-		special_tokens = self.tokenizer.encode(special_chars)
+		special_tokens = self.tokenizer.encode(special_chars, spaces)
 		sequences = self.beam_search(inputs, max_new_tokens, max_top_next, stop_tokens=special_tokens)
 
 		"""Equivalent `generate` method for comparison"""
@@ -109,7 +110,7 @@ class Model:
 			while i < num_beams:
 
 				# Find highest value for all probabilities, knowing that torch.topk also does ordering
-				max_sums = [new_probs[line, column_indices[line]].item() for line in range(num_beams)]
+				max_sums = [new_probs[line, column_indices[line]].item() for line in range(len(column_indices))]
 				line_index = argmax(max_sums)
 				best_next_token = top_indices[line_index, column_indices[line_index]]
 
