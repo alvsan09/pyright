@@ -22,8 +22,9 @@ class Model:
 		self.model: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(model_file_path, local_files_only=True)
 		self.cache = dict()
 
-	def predict(self, context: 'tuple[str]') -> 'list[str]' :
+	def predict(self, context: str) -> 'list[str]' :
 
+		context = context.replace('\r', '')
 		inputs = self.tokenizer.encode(context)
 		sequences = self.beam_search(inputs, max_new_tokens, max_top_next)
 
@@ -35,8 +36,9 @@ class Model:
 
 		return predictions
 
-	def prepare(self, context: 'tuple[str]') -> None :
+	def prepare(self, context: str) -> None :
 
+		context = context.replace('\r', '')
 		inputs = self.tokenizer.encode(context)
 		self.forward(inputs)
 		return
