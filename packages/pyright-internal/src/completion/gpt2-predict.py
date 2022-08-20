@@ -77,46 +77,46 @@ class Model:
 		finished_sequences = torch.empty((0, num_new_tokens), dtype=torch.int32)
 
 		# Recursive beam search
-		for iteration in range(num_new_tokens - 1):
+		for iteration in range(2, num_new_tokens + 1):
 			if num_beams <= 0:
 				sequences = torch.empty((0, num_new_tokens), dtype=torch.int32)
 				break
 
+			# Prepare inputs
+			next_inputs = sequences[:, -1].unsqueeze(1)
+
 			# Prepare past_key_values
 			N_LAYERS = 12
-			past_key_values = [(torch.empty(0, 12, 3, 64), torch.empty(0, 12, 3, 64))] * N_LAYERS
+			num_previous_tokens = len(inputs) + sequences.size(1)
+			past_key_values = [(torch.empty(0, N_LAYERS, num_previous_tokens, 64), torch.empty(0, N_LAYERS, num_previous_tokens, 64))] * N_LAYERS
 			for layer, (keys, values) in enumerate(past_key_values):
 				keys = torch.cat(tuple(pkv[layer][0] for pkv in pkv_mem[:num_beams]), dim=0)
 				values = torch.cat(tuple(pkv[layer][1] for pkv in pkv_mem[:num_beams]), dim=0)
 				past_key_values[layer] = (keys, values)
-			
-			# Prepare next inputs (end of generated sequences)
-			next_inputs = sequences[:, -1].unsqueeze(1)
 
-			# Forward pass
 			outputs = self.model.forward(next_inputs, past_key_values=tuple(past_key_values), use_cache=True, return_dict=True)
 
-			# Extract most probable tokens
+			# Extract best tokens and their probabilities
 			last_logits = outputs.logits[:, 0].softmax(dim = 1)
 			top_values, top_indices = last_logits.topk(num_beams, sorted=True)
 
 			# Multiply probabilities by previous for each line
 			new_probs = torch.mul(top_values, probs.unsqueeze(1))
 
-			# Generate new sequences, their probabilities and past key values
-			new_sequences = torch.empty((0, iteration + 2), dtype=torch.int32)
+			# Generate new sequences
 			column_indices = [0] * num_beams
+			new_sequences = torch.empty((0, iteration), dtype=torch.int32)
 			i = 0
 			while i < num_beams:
-
 				# Find highest value for all probabilities, knowing that torch.topk also does ordering
 				max_sums = [new_probs[line, column_indices[line]].item() for line in range(len(column_indices))]
 				line_index = argmax(max_sums)
-				best_next_token = top_indices[line_index, column_indices[line_index]]
+				column_index = column_indices[line_index]
+				best_next_token = top_indices[line_index, column_index]
 
 				# Save sequence as is if encountering a stop token
 				if best_next_token.item() in stop_tokens or ' ' in self.tokenizer.decode(best_next_token.item())[0]:
-					padding = (best_next_token.unsqueeze(0),) * (num_new_tokens - iteration - 1)
+					padding = (best_next_token.unsqueeze(0),) * (num_new_tokens - iteration + 1)
 					sequence = torch.cat((sequences[line_index],) + padding)
 					finished_sequences = torch.cat((finished_sequences, sequence.unsqueeze(0)))
 
@@ -130,7 +130,7 @@ class Model:
 				new_sequences = torch.cat((new_sequences, sequence.unsqueeze(0)))
 
 				# Update probability products
-				probs[i] = new_probs[line_index, column_indices[line_index]]
+				probs[i] = new_probs[line_index, column_index]
 
 				# Update past keys and values stack
 				new_pkv = []
